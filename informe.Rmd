@@ -1,0 +1,211 @@
+---
+title: "ACP datos mixtos"
+autor: María Belén Rosero
+date: "`r Sys.Date()`"
+---
+#Introducción
+El enfoque que daremos es  la construcción de un índice cualitativo sobre la base Data Banco utilizando la Técnica de Análisis de Componentes Principales.
+El ACP, el análisis de componentes principales que es una técnica estadística para describir un conjunto de datos en términos de nuevas variables las cuales no están correlacionadas llamadas “componentes”. Estos componentes se ordenan por la cantidad de varianza original que describen lo que nos permite reducir la dimensión dada de un conjunto de datos. 
+Además el ACP es empleado para obtener un mejor análisis exploratorio, tener una mejor descripción y clasificación, comprobación de hipótesis multivariables , identificación de estructuras latentes , transformación funcional de los datos y formación de escalas.
+Basados en el análisis multivariado de datos mixtos donde las observaciones se describen mediante una mezcla de variables cuantitativas y cualitativas se ha utilizado el paquete disponible para datos mixtos llamado pcamixdata , este está dedicado a datos mixtos y nos proporciona tres funciones principales: una mezcla de variables numéricas y categóricas, rotación y análisis de factores múltiples de datos mixtos de tablas múltiples. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(openxlsx)
+library(stringr)
+library(magrittr)
+library(tidyverse)
+library(dplyr)
+library(nortest) 
+library(caret) 
+library(magrittr)
+library(kableExtra)
+library(PCAmixdata)
+library(factoextra)
+library(clustertend)
+```
+
+#Lectura de la Base
+A continuación se carga la base Data_Banco realizando una serie de cambios definiendo el tipo de variable.
+```{r echo=FALSE}
+data_banco <- read.xlsx(xlsxFile = "BD/Data_Banco.xlsx", sheet = "Data")
+names(data_banco)[1]='ID_Sucursal'
+data_sucursal <- read.xlsx(xlsxFile = "BD/Data_Banco.xlsx", sheet = "Data_Sucursal")
+data_cajero = read.xlsx(xlsxFile = "BD/Data_Banco.xlsx", sheet = "Data_Cajero")
+data_cajero$Cajero = as.numeric(data_cajero$Cajero)
+data_cajero$Edad = as.numeric(data_cajero$Edad)
+
+datos = data_banco %>%
+  left_join(data_sucursal,by="ID_Sucursal") %>%
+  left_join(data_cajero,by="Cajero") %>%
+  mutate(Transaccion = ifelse(Transaccion=="Cobrar cheque (Cta del Bco)",
+                              "Cobrar cheque",Transaccion)) %>% 
+  mutate(Transaccion = ifelse(Transaccion=="Cobro/Pago (Cta externa)",
+                              "Cobro-Pago",Transaccion)) %>%
+  mutate(Anio.experiencia = 2019-Anio.Ingreso) %>%
+  mutate(Nivel_Formacion = factor(Nivel_Formacion,
+                                  levels = c('Tecnologia','Bachiller',
+                                             'Univ Incom.','Tercer nivel'),
+                                  labels = c('Tecnologia','Bachiller',
+                                             'Univ Incom.','Tercer nivel'),
+                                  ordered = F)) %>% 
+  mutate(Sucursal = factor(Sucursal,
+                           levels = c('Centro','Mall del Sol','Via Daule',
+                                      'Riocentro Sur','Alborada'),
+                           labels = c('Centro','Mall del Sol','Via Daule',
+                                      'Riocentro Sur','Alborada'),
+                           ordered = F)) %>% 
+  mutate(Satisfaccion = factor(Satisfaccion,
+                               levels = c('Muy Malo','Malo','Regular',
+                                          'Bueno','Muy Bueno'),
+                               labels = c('Muy Malo','Malo','Regular',
+                                          'Bueno','Muy Bueno'),
+                               ordered = F)) %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate(Cajero=factor(Cajero)) %>% 
+  mutate(Monto=as.numeric(Monto))
+glimpse(datos)
+```
+
+Identificaremos las variables, las variables cuantitativas son: Tiempo_Servicio_seg, Monto, Edad, Anio.experiencia. Las variables cualitativas son: Cajero, Transaccion, Satisfaccion, Sucursal, Nuevo_Sistema, Sexo, Nivel_Formacion.
+
+#PAQUETE PCAmixdata
+La función splitmix nos permitirá dividir la base en dos conjuntos de datos, los cuales son con variables numéricas y con variables categóricas.
+
+```{r}
+split= splitmix(datos %>% select(-ID_Sucursal,-Anio.Ingreso,-ID_Transaccion))
+X1 <- split$X.quanti
+X2 <- split$X.quali
+pcamix = PCAmix(X.quanti=X1, X.quali=X2,rename.level=TRUE, graph=FALSE)
+pcamix$eig
+```
+ La inercia total acumulada hasta la dimensión 16 es de 62.19%.
+```{r}
+pcamix$sqload
+```
+
+## Gráficos
+En el gráfico podemos observar a a todas las varibales numéricas y categóricas además de las direcciones de crecimiento de las variables.
+
+```{r}
+plot(pcamix,choice="sqload",coloring.var=T, leg=TRUE,
+posleg="topleft", main="Todas de variables")
+
+```
+En el siguiente gráfico se muestra el mapa de componentes principales y se puede observar la concentración de datos en 2 dimensiones.
+```{r}
+plot(pcamix,choice="ind",coloring.var = T,label=FALSE,posleg="bottomright", main="Observaciones")
+```
+
+```{r}
+plot(pcamix,choice="ind",coloring.ind=X2$Sucursal,label=FALSE,
+posleg="bottomright", main="Observaciones por Sucursal")
+```
+
+```{r}
+plot(pcamix,choice="ind",coloring.ind=X2$Cajero,label=FALSE,
+posleg="bottomright", main="Observaciones por Cajero")
+```
+
+La siguiente gráfica indica un círculo de correlación, en este caso se tiene una correlación negativa
+```{r}
+plot(pcamix,choice="cor",main="Variables Numéricas")
+```
+
+
+##Rotación
+Usaremos la función PCArot para simpificar la interpretación de los datos de las componente principales.
+
+###Muestra de Entrenamiento
+```{r include=FALSE}
+datos %>% select(-ID_Sucursal,-Anio.Ingreso,-ID_Transaccion)
+```
+
+```{r}
+
+train <- datos[-c(1:10000), ]
+split <- splitmix(train)
+X1 <- split$X.quanti
+X2 <- split$X.quali
+res.pcamix <- PCAmix(X.quanti=X1, X.quali=X2,rename.level=TRUE, graph=FALSE)
+res.pcamix$eig
+```
+ A partir de la dim 10 ya se tiene un acumulado de 60.22% del total de inercia.
+ 
+  En la dim 5 se tiene una acumulado de 41.28% 
+```{r}
+res.pcarot<-PCArot(res.pcamix,dim=5,graph=FALSE)
+res.pcarot$eig #variance of the rotated PCs
+sum(res.pcarot$eig[,2])
+```
+```{r}
+res.pcamix$sqload[,1:5]
+res.pcarot$sqload
+```
+ Pero se puede observar que en este caso no mejora la interpretación de los datos. Debido a esto se procede a realizar indicadores respecto a  la satisfacción ya que estos problemas de que no se encuentra una mejora sea debido a la repetición de datos.
+```{r}
+#Obtencion de indicadores para satisfaccion
+
+#Para cajero
+indicador_cajero <- datos %>% mutate(Peso=ifelse(Satisfaccion=="Muy Malo",1,
+                                          ifelse(Satisfaccion=="Malo",2, 
+                                                 ifelse(Satisfaccion=="Regular",3,
+                                                        ifelse(Satisfaccion=="Bueno",4,5))))) %>% 
+  group_by(Cajero,Satisfaccion) %>% summarise(Total=n(), Peso=sum(Peso))
+indicador_cajero <- indicador_cajero %>% group_by(Cajero) %>% 
+  summarise(indicador_cajero=(sum(Peso)/sum(Total)))
+datos <- left_join(datos,indicador_cajero)
+
+#Para sucursales
+indicador_sucursal <- datos %>% mutate(Peso=ifelse(Satisfaccion=="Muy Malo",1,
+                                                      ifelse(Satisfaccion=="Malo",2, 
+                                                             ifelse(Satisfaccion=="Regular",3,
+                                                                    ifelse(Satisfaccion=="Bueno",4,5))))) %>% 
+  group_by(Sucursal,Satisfaccion) %>% summarise(Total=n(), Peso=sum(Peso))
+indicador_sucursal <- indicador_sucursal %>% group_by(Sucursal) %>% 
+  summarise(indicador_sucursal=(sum(Peso)/sum(Total)))
+datos <- left_join(datos,indicador_sucursal)
+
+data<- select(datos,-ID_Sucursal,-Anio.Ingreso,-ID_Transaccion)
+```
+
+Aplicación de la función splitmix
+
+```{r}
+split <- splitmix(data)
+X1 <- split$X.quanti
+X2 <- split$X.quali
+res1.pcamix <- PCAmix(X.quanti=X1, X.quali=X2,rename.level=TRUE,graph=FALSE)
+res1.pcamix$eig
+```
+
+```{r}
+res1.pcamix$sqload
+```
+Por otra parte se nota un aumento en la dim 5 de las variables  por lo que se procede a verificar en los gráficos
+
+##Gráficos
+
+```{r}
+plot(res1.pcamix,choice="sqload",coloring.var=T, leg=TRUE,
+posleg="topright", main="Todas las Variables")
+```
+```{r}
+df_pca = cbind(data,res1.pcamix$scores)
+
+ggplot(df_pca) +
+ aes(x = `dim 1`, y = `dim 2`, colour = Cajero) +
+ geom_point(size = 1L, alpha=0.6)+
+ scale_color_viridis_d() +
+ theme_minimal()
+```
+
+```{r}
+plot(res1.pcamix,choice="ind",coloring.var = T,label=FALSE,posleg="bottomright", main="Observaciones")
+```
+
+```{r}
+plot(res1.pcamix,choice="cor",main="Variables Numéricas")
+```
+
+
+
